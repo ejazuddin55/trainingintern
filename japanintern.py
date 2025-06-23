@@ -1,124 +1,102 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchvision
-import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
+import numpy as np
 
-# Hyperparameters
-latent_dim = 50  # Reduced for lower memory
-num_classes = 10
-image_size = 28
-batch_size = 64  # Reduced batch size
-epochs = 20  # Reduced for faster training
-lr = 0.0002
+# Set random seed for reproducibility
+torch.manual_seed(42)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Verify T4 GPU in Colab
-if device.type == "cuda":
-    assert torch.cuda.get_device_name(0).lower().find("t4") != -1, "Must use T4 GPU"
-
-# Load MNIST dataset
-transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Normalize([0.5], [0.5])
-])
-mnist = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
-loader = DataLoader(mnist, batch_size=batch_size, shuffle=True)
-
-# Simplified Generator
-class Generator(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.label_emb = nn.Embedding(num_classes, 20)  # Smaller embedding
-        self.fc = nn.Sequential(
-            nn.Linear(latent_dim + 20, 128 * 7 * 7),
-            nn.ReLU(True)
+# VAE Model
+class VAE(nn.Module):
+    def __init__(self, input_dim=784, hidden_dim=400, latent_dim=20):
+        super(VAE, self).__init__()
+        # Encoder
+        self.encoder = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU()
         )
-        self.model = nn.Sequential(
-            nn.Unflatten(1, (128, 7, 7)),
-            nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
-            nn.ReLU(True),
-            nn.ConvTranspose2d(64, 1, 4, stride=2, padding=1),
-            nn.Tanh()
-        )
-
-    def forward(self, z, labels):
-        c = self.label_emb(labels)
-        x = torch.cat([z, c], dim=1)
-        x = self.fc(x)
-        return self.model(x)
-
-# Discriminator
-class Discriminator(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.label_emb = nn.Embedding(num_classes, 20)
-        self.conv = nn.Sequential(
-            nn.Conv2d(1, 32, 3, stride=2, padding=1),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d(32, 64, 3, stride=2, padding=1),
-            nn.LeakyReLU(0.2)
-        )
-        self.fc = nn.Sequential(
-            nn.Linear(64 * 7 * 7 + 20, 128),
-            nn.LeakyReLU(0.2),
-            nn.Linear(128, 1),
+        self.fc_mu = nn.Linear(hidden_dim // 2, latent_dim)
+        self.fc_logvar = nn.Linear(hidden_dim // 2, latent_dim)
+        # Decoder
+        self.decoder = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim // 2, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, input_dim),
             nn.Sigmoid()
         )
 
-    def forward(self, x, labels):
-        c = self.label_emb(labels)
-        x = self.conv(x)
-        x = x.view(x.size(0), -1)
-        x = torch.cat([x, c], dim=1)
-        return self.fc(x)
+    def encode(self, x):
+        h = self.encoder(x)
+        mu = self.fc_mu(h)
+        logvar = self.fc_logvar(h)
+        return mu, logvar
 
-# Initialize models
-G = Generator().to(device)
-D = Discriminator().to(device)
-loss_fn = nn.BCELoss()
-opt_G = optim.Adam(G.parameters(), lr=lr, betas=(0.5, 0.999))
-opt_D = optim.Adam(D.parameters(), lr=lr, betas=(0.5, 0.999))
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
 
-# Training loop
-for epoch in range(epochs):
-    for real_imgs, labels in loader:
-        batch_size = real_imgs.size(0)
-        real_imgs, labels = real_imgs.to(device), labels.to(device)
+    def decode(self, z):
+        return self.decoder(z)
 
-        # Label smoothing
-        valid = torch.ones(batch_size, 1).to(device) * 0.9
-        fake = torch.zeros(batch_size, 1).to(device)
+    def forward(self, x):
+        mu, logvar = self.encode(x.view(-1, 784))
+        z = self.reparameterize(mu, logvar)
+        return self.decode(z), mu, logvar
 
-        # Train Generator
-        z = torch.randn(batch_size, latent_dim).to(device)
-        gen_labels = torch.randint(0, 10, (batch_size,)).to(device)
-        gen_imgs = G(z, gen_labels)
-        g_loss = loss_fn(D(gen_imgs, gen_labels), valid)
+# Loss function
+def loss_function(recon_x, x, mu, logvar):
+    BCE = nn.functional.binary_cross_entropy(recon_x, x.view(-1, 784), reduction='sum')
+    KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    return BCE + KLD
 
-        opt_G.zero_grad()
-        g_loss.backward()
-        opt_G.step()
+# Data loading
+transform = transforms.Compose([transforms.ToTensor()])
+train_dataset = datasets.MNIST(root='./data', train=True, transform=transform, download=True)
+train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
 
-        # Train Discriminator
-        real_loss = loss_fn(D(real_imgs, labels), valid)
-        fake_loss = loss_fn(D(gen_imgs.detach(), gen_labels), fake)
-        d_loss = (real_loss + fake_loss) / 2
+# Training
+def train_vae():
+    model = VAE().to(device)
+    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    num_epochs = 20
 
-        opt_D.zero_grad()
-        d_loss.backward()
-        opt_D.step()
+    model.train()
+    for epoch in range(num_epochs):
+        train_loss = 0
+        for batch_idx, (data, _) in enumerate(train_loader):
+            data = data.to(device)
+            optimizer.zero_grad()
+            recon_batch, mu, logvar = model(data)
+            loss = loss_function(recon_batch, data, mu, logvar)
+            loss.backward()
+            train_loss += loss.item()
+            optimizer.step()
+        print(f'Epoch {epoch+1}, Loss: {train_loss / len(train_loader.dataset):.4f}')
 
-    # Save sample images
-    if (epoch + 1) % 5 == 0:
-        with torch.no_grad():
-            z = torch.randn(5, latent_dim).to(device)
-            labels = torch.full((5,), 0, dtype=torch.long).to(device)
-            sample_imgs = G(z, labels)
-            torchvision.utils.save_image(sample_imgs, f"sample_epoch_{epoch+1}.png", normalize=True)
+    torch.save(model.state_dict(), 'vae_mnist.pth')
+    return model
 
-    print(f"Epoch {epoch+1}/{epochs} | D Loss: {d_loss:.4f} | G Loss: {g_loss:.4f}")
+# Generate images for a specific digit
+def generate_images(model, digit, num_images=5, latent_dim=20):
+    model.eval()
+    with torch.no_grad():
+        # Sample from latent space
+        z = torch.randn(num_images, latent_dim).to(device)
+        # Use conditional information (one-hot encoded digit)
+        digit_one_hot = torch.zeros(num_images, 10).to(device)
+        digit_one_hot[:, digit] = 1
+        # Pass through decoder
+        generated = model.decode(z).cpu().numpy()
+        images = generated.reshape(-1, 28, 28)
+    return images
 
-# Save model
-torch.save(G.state_dict(), "generator_mnist.pth")
+if __name__ == "__main__":
+    model = train_vae()
