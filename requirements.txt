@@ -1,6 +1,5 @@
 streamlit==1.26.0
 torch==2.2.2+cpu
 torchvision==0.17.2+cpu
-matplotlib==3.8.3
-Pillow==10.3.0
+matplotlib
 -f https://download.pytorch.org/whl/torch_stable.html
