@@ -4,14 +4,13 @@ import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
-import numpy as np
 
 # Hyperparameters
-latent_dim = 100
+latent_dim = 50  # Reduced for lower memory
 num_classes = 10
 image_size = 28
-batch_size = 128
-epochs = 30
+batch_size = 64  # Reduced batch size
+epochs = 20  # Reduced for faster training
 lr = 0.0002
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -22,30 +21,26 @@ if device.type == "cuda":
 # Load MNIST dataset
 transform = transforms.Compose([
     transforms.ToTensor(),
-    transforms.Normalize([0.5], [0.5])  # Normalize to [-1, 1]
+    transforms.Normalize([0.5], [0.5])
 ])
 mnist = torchvision.datasets.MNIST(root='./data', train=True, download=True, transform=transform)
 loader = DataLoader(mnist, batch_size=batch_size, shuffle=True)
 
-# Generator
+# Simplified Generator
 class Generator(nn.Module):
     def __init__(self):
         super().__init__()
-        self.label_emb = nn.Embedding(num_classes, 50)  # Larger embedding
+        self.label_emb = nn.Embedding(num_classes, 20)  # Smaller embedding
         self.fc = nn.Sequential(
-            nn.Linear(latent_dim + 50, 128 * 7 * 7),
+            nn.Linear(latent_dim + 20, 128 * 7 * 7),
             nn.ReLU(True)
         )
         self.model = nn.Sequential(
             nn.Unflatten(1, (128, 7, 7)),
             nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
-            nn.BatchNorm2d(64),
             nn.ReLU(True),
-            nn.ConvTranspose2d(64, 32, 4, stride=2, padding=1),
-            nn.BatchNorm2d(32),
-            nn.ReLU(True),
-            nn.ConvTranspose2d(32, 1, 3, stride=1, padding=1),
-            nn.Tanh()  # Output in [-1, 1]
+            nn.ConvTranspose2d(64, 1, 4, stride=2, padding=1),
+            nn.Tanh()
         )
 
     def forward(self, z, labels):
@@ -58,19 +53,17 @@ class Generator(nn.Module):
 class Discriminator(nn.Module):
     def __init__(self):
         super().__init__()
-        self.label_emb = nn.Embedding(num_classes, 50)
+        self.label_emb = nn.Embedding(num_classes, 20)
         self.conv = nn.Sequential(
             nn.Conv2d(1, 32, 3, stride=2, padding=1),
             nn.LeakyReLU(0.2),
             nn.Conv2d(32, 64, 3, stride=2, padding=1),
-            nn.LeakyReLU(0.2),
-            nn.Conv2d(64, 128, 3, stride=2, padding=1),
             nn.LeakyReLU(0.2)
         )
         self.fc = nn.Sequential(
-            nn.Linear(128 * 4 * 4 + 50, 256),
+            nn.Linear(64 * 7 * 7 + 20, 128),
             nn.LeakyReLU(0.2),
-            nn.Linear(256, 1),
+            nn.Linear(128, 1),
             nn.Sigmoid()
         )
 
@@ -117,11 +110,11 @@ for epoch in range(epochs):
         d_loss.backward()
         opt_D.step()
 
-    # Save sample images every 10 epochs
-    if (epoch + 1) % 10 == 0:
+    # Save sample images
+    if (epoch + 1) % 5 == 0:
         with torch.no_grad():
             z = torch.randn(5, latent_dim).to(device)
-            labels = torch.full((5,), 0, dtype=torch.long).to(device)  # Test with digit 0
+            labels = torch.full((5,), 0, dtype=torch.long).to(device)
             sample_imgs = G(z, labels)
             torchvision.utils.save_image(sample_imgs, f"sample_epoch_{epoch+1}.png", normalize=True)
 
@@ -129,18 +122,3 @@ for epoch in range(epochs):
 
 # Save model
 torch.save(G.state_dict(), "generator_mnist.pth")
-
-# Function to load generator (for web app)
-def load_generator():
-    model = Generator().to(device)
-    model.load_state_dict(torch.load("generator_mnist.pth", map_location=device))
-    model.eval()
-    return model
-
-# Function to generate images
-def generate_images(digit, num_images=5):
-    z = torch.randn(num_images, latent_dim).to(device)
-    labels = torch.full((num_images,), digit, dtype=torch.long).to(device)
-    with torch.no_grad():
-        images = G(z, labels).cpu()
-    return images
