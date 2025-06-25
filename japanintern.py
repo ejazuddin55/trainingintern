@@ -18,7 +18,7 @@ This app trains a VAE on MNIST digits and generates new images.
 # Sidebar controls
 with st.sidebar:
     st.header("Controls")
-    epochs = st.slider("Training epochs", 1, 50, 10)
+    epochs = st.slider("Training epochs", 1, 50, 5)
     batch_size = st.slider("Batch size", 32, 256, 128)
     latent_dim = st.slider("Latent dimension", 2, 100, 20)
     train_button = st.button("Train Model")
