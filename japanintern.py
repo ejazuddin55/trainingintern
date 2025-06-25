@@ -1,15 +1,34 @@
+import streamlit as st
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import numpy as np
+import matplotlib.pyplot as plt
+import time
 
-# Set random seed for reproducibility
-torch.manual_seed(42)
+# App title and config
+st.set_page_config(page_title="MNIST VAE Generator", layout="wide")
+st.title("🎨 MNIST Variational Autoencoder")
+st.markdown("""
+This app trains a VAE on MNIST digits and generates new images.
+""")
+
+# Sidebar controls
+with st.sidebar:
+    st.header("Controls")
+    epochs = st.slider("Training epochs", 1, 50, 10)
+    batch_size = st.slider("Batch size", 32, 256, 128)
+    latent_dim = st.slider("Latent dimension", 2, 100, 20)
+    train_button = st.button("Train Model")
+    generate_button = st.button("Generate Images")
+
+# Set device and random seed
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.manual_seed(42)
 
-# VAE Model
+# VAE Model Definition
 class VAE(nn.Module):
     def __init__(self, input_dim=784, hidden_dim=400, latent_dim=20):
         super(VAE, self).__init__()
@@ -57,19 +76,21 @@ def loss_function(recon_x, x, mu, logvar):
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
     return BCE + KLD
 
-# Data loading
-transform = transforms.Compose([transforms.ToTensor()])
-train_dataset = datasets.MNIST(root='./data', train=True, transform=transform, download=True)
-train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True)
+# Training function with progress bar
+def train_vae(epochs, batch_size, latent_dim):
+    transform = transforms.Compose([transforms.ToTensor()])
+    train_dataset = datasets.MNIST(root='./data', train=True, transform=transform, download=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-# Training
-def train_vae():
-    model = VAE().to(device)
+    model = VAE(latent_dim=latent_dim).to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-3)
-    num_epochs = 20
-
+    
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    loss_history = []
+    
     model.train()
-    for epoch in range(num_epochs):
+    for epoch in range(epochs):
         train_loss = 0
         for batch_idx, (data, _) in enumerate(train_loader):
             data = data.to(device)
@@ -79,24 +100,40 @@ def train_vae():
             loss.backward()
             train_loss += loss.item()
             optimizer.step()
-        print(f'Epoch {epoch+1}, Loss: {train_loss / len(train_loader.dataset):.4f}')
-
-    torch.save(model.state_dict(), 'vae_mnist.pth')
+        
+        avg_loss = train_loss / len(train_loader.dataset)
+        loss_history.append(avg_loss)
+        
+        progress_bar.progress((epoch + 1) / epochs)
+        status_text.text(f"Epoch {epoch+1}/{epochs} - Loss: {avg_loss:.4f}")
+        time.sleep(0.1)
+    
+    st.line_chart(loss_history)
+    st.success("Training completed!")
     return model
 
-# Generate images for a specific digit
-def generate_images(model, digit, num_images=5, latent_dim=20):
+# Image generation function
+def generate_images(model, latent_dim):
     model.eval()
     with torch.no_grad():
-        # Sample from latent space
-        z = torch.randn(num_images, latent_dim).to(device)
-        # Use conditional information (one-hot encoded digit)
-        digit_one_hot = torch.zeros(num_images, 10).to(device)
-        digit_one_hot[:, digit] = 1
-        # Pass through decoder
+        z = torch.randn(10, latent_dim).to(device)
         generated = model.decode(z).cpu().numpy()
-        images = generated.reshape(-1, 28, 28)
-    return images
+    
+    fig, axes = plt.subplots(2, 5, figsize=(10, 4))
+    for i, ax in enumerate(axes.flat):
+        ax.imshow(generated[i].reshape(28, 28), cmap='gray')
+        ax.axis('off')
+    st.pyplot(fig)
 
-if __name__ == "__main__":
-    model = train_vae()
+# Main app logic
+if train_button:
+    st.subheader("Training Progress")
+    with st.spinner("Training in progress..."):
+        model = train_vae(epochs, batch_size, latent_dim)
+        st.session_state.model = model
+
+if generate_button and 'model' in st.session_state:
+    st.subheader("Generated Images")
+    generate_images(st.session_state.model, latent_dim)
+elif generate_button:
+    st.warning("Please train the model first!")
