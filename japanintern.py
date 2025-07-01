@@ -1,18 +1,17 @@
-# app.py - Digit-Specific VAE Generator using pretrained model
+# app.py - Streamlit Conditional VAE Digit Generator
 import streamlit as st
 import torch
 import torch.nn as nn
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
 import numpy as np
 from PIL import Image
 import os
 
-# 1. VAE Model with Conditional Generation
+# 1. Define Conditional VAE Architecture
 class ConditionalVAE(nn.Module):
     def __init__(self, input_dim=784, hidden_dim=400, latent_dim=20, num_classes=10):
         super(ConditionalVAE, self).__init__()
-        
+
+        # Encoder
         self.encoder = nn.Sequential(
             nn.Linear(input_dim + num_classes, hidden_dim),
             nn.ReLU(),
@@ -22,6 +21,7 @@ class ConditionalVAE(nn.Module):
         self.fc_mu = nn.Linear(hidden_dim // 2, latent_dim)
         self.fc_logvar = nn.Linear(hidden_dim // 2, latent_dim)
 
+        # Decoder
         self.decoder = nn.Sequential(
             nn.Linear(latent_dim + num_classes, hidden_dim // 2),
             nn.ReLU(),
@@ -54,8 +54,7 @@ class ConditionalVAE(nn.Module):
         z = self.reparameterize(mu, logvar)
         return self.decode(z, c), mu, logvar
 
-
-# 2. Load pretrained model
+# 2. Load Pretrained Model Correctly
 @st.cache_resource
 def load_model():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -63,42 +62,43 @@ def load_model():
     model_path = "vae_mnist_trained.pth"
 
     if os.path.exists(model_path):
-        model.load_state_dict(torch.load(model_path, map_location=device))
+        try:
+            state_dict = torch.load(model_path, map_location=device)
+            model.load_state_dict(state_dict)
+        except Exception as e:
+            st.error("❌ Failed to load model state dict. Ensure it's saved with `model.state_dict()`.")
+            st.stop()
     else:
-        st.error("❌ Model file 'vae_mnist_trained.pth' not found in the project folder.")
+        st.error("❌ Model file `vae_mnist_trained.pth` not found. Please upload it to the root directory.")
         st.stop()
 
     return model
 
-
-# 3. Generate digit-specific images
+# 3. Generate Digit Images
 def generate_digit_images(model, digit, num_images=5):
     model.eval()
     device = next(model.parameters()).device
-
     with torch.no_grad():
         z = torch.randn(num_images, 20).to(device)
         digits = torch.full((num_images,), digit, dtype=torch.long).to(device)
         samples = model.decode(z, digits).cpu().numpy()
-
     return samples.reshape(-1, 28, 28)
-
 
 # 4. Streamlit UI
 def main():
-    st.set_page_config(page_title="Digit-Specific VAE Generator", page_icon="🔢", layout="centered")
-    st.title("🔢 Digit-Specific Generator")
-    st.markdown("Generate 5 images of a chosen digit using a pretrained Conditional VAE.")
+    st.set_page_config(page_title="Digit Generator", page_icon="🔢", layout="centered")
+    st.title("🔢 Digit-Specific VAE Generator")
+    st.markdown("Generate 5 synthetic images of a handwritten digit (0–9) using a pretrained Conditional VAE.")
 
     model = load_model()
 
-    digit = st.selectbox("Select a digit (0–9):", options=list(range(10)), index=5)
+    digit = st.selectbox("Select digit to generate:", options=list(range(10)), index=5)
 
     if st.button("Generate 5 Images", type="primary"):
-        with st.spinner(f"Generating images for digit {digit}..."):
+        with st.spinner(f"Generating images of digit {digit}..."):
             images = generate_digit_images(model, digit)
 
-        st.success(f"Generated 5 samples for digit {digit}:")
+        st.success(f"Here are 5 generated images of digit {digit}:")
         cols = st.columns(5)
         for i, img in enumerate(images):
             with cols[i]:
@@ -112,7 +112,6 @@ def main():
                 file_name=f"digit_{digit}_sample.png",
                 mime="image/png"
             )
-
 
 if __name__ == "__main__":
     main()
