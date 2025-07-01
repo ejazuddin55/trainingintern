@@ -1,5 +1,3 @@
-
-
 import streamlit as st
 import torch
 import torch.nn as nn
@@ -147,7 +145,7 @@ def main():
         cols = st.columns(5)
         for i, img in enumerate(images):
             with cols[i]:
-                st.image(img, caption=f"Digit {digit}-{i+1}", use_column_width=True)
+                st.image(img, caption=f"Digit {digit}-{i+1}", use_container_width=True)
         
         # Download option
         with st.expander("Download Options"):
