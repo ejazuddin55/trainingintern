@@ -58,11 +58,11 @@ def load_model():
     st.write(f"Device: {device}")
     model = ConditionalVAE().to(device)
     
-    if os.path.exists("vae_mnist.pth"):
-        model.load_state_dict(torch.load("vae_mnist.pth", map_location=device))
+    if os.path.exists("conditional_vae_mnist.pth"):
+        model.load_state_dict(torch.load("conditional_vae_mnist.pth", map_location=device))
         st.write(f"Model loaded in {time.time() - start_time:.2f} seconds")
     else:
-        st.error("Pre-trained model 'vae_mnist.pth' not found. Please upload it.")
+        st.error("Pre-trained model 'conditional_vae_mnist.pth' not found. Please upload it.")
         st.stop()
     
     return model
