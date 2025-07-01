@@ -5,7 +5,7 @@ from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 
 class ConditionalVAE(nn.Module):
-    def __init__(self, input_dim=784, hidden_dim=400, latent_dim=20, num_classes=10):
+    def __init__(self, input_dim=784, hidden_dim=200, latent_dim=10, num_classes=10):
         super(ConditionalVAE, self).__init__()
         self.encoder = nn.Sequential(
             nn.Linear(input_dim + num_classes, hidden_dim),
@@ -70,7 +70,7 @@ def train_model(epochs=10):
             train_loss += loss.item()
             optimizer.step()
         print(f"Epoch {epoch+1}/{epochs}, Loss: {train_loss/len(train_loader.dataset):.4f}")
-    torch.save(model.state_dict(), "conditional_vae_mnist.pth")
+    torch.save(model.state_dict(), "vae_mnist.pth")
     return model
 
 if __name__ == "__main__":
